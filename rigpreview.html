@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skeletal Animation & Sprite Player</title>
+    <style>
+        :root { 
+            --bg: #1e1e1e; 
+            --text: #d4d4d4; 
+            --panel: #252526; 
+            --accent: #007acc; 
+            --accent-hover: #005f9e;
+            --accent2: #4ec9b0;
+            --accent2-hover: #3da892;
+        }
+        
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: var(--text); margin: 0; display: flex; flex-direction: column; height: 100vh; }
+        header { padding: 12px 20px; background: #111; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--accent); }
+        .controls { display: flex; gap: 10px; align-items: center; }
+        
+        .upload-btn { background: var(--accent2); color: #111; border: none; padding: 8px 16px; cursor: pointer; border-radius: 4px; font-weight: bold; transition: background 0.2s; display: inline-flex; align-items: center; gap: 6px; }
+        .upload-btn:hover { background: var(--accent2-hover); }
+        
+        .btn-ui { background: transparent; border: 1px solid #666; color: #ccc; padding: 7px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+        .btn-ui:hover { background: #333; color: #fff; }
+        .btn-ui.active { background: var(--accent); color: white; border-color: var(--accent); }
+
+        select { background: #252526; color: #fff; border: 1px solid #555; padding: 6px 10px; border-radius: 4px; font-weight: bold; font-size: 13px; }
+
+        .container { display: flex; flex: 1; overflow: hidden; }
+        .col { flex: 1; border-right: 1px solid #333; display: flex; flex-direction: column; background: var(--panel); }
+        .col h2 { background: #333; margin: 0; padding: 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #111; z-index: 10; }
+        .content { flex: 1; overflow-y: auto; padding: 15px; font-size: 14px; }
+        
+        #canvas-area { position: relative; flex: 2.5; display: flex; flex-direction: column; background: #151515; }
+        canvas { 
+            flex: 1;
+            width: 100%; 
+            display: block;
+            image-rendering: pixelated; 
+        }
+        
+        #playback-bar {
+            background: #181818;
+            border-top: 1px solid #333;
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 13px;
+        }
+        #timeSlider { flex: 1; cursor: pointer; accent-color: var(--accent); }
+        
+        ul { list-style-type: none; padding-left: 20px; }
+        ul.root { padding-left: 0; margin-top: 0; }
+        li { margin: 6px 0; }
+        
+        .bone { color: #4ec9b0; font-family: monospace; cursor: crosshair; }
+        .bone:hover { color: #ffff00; text-decoration: underline; }
+        
+        .anim-item {
+            display: block;
+            background: #2d2d30;
+            padding: 8px 10px;
+            margin-bottom: 6px;
+            border-radius: 4px;
+            border: 1px solid transparent;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .anim-item:hover { background: #38383c; border-color: #555; }
+        .anim-item.active { background: #1e3a5f; border-color: var(--accent); }
+        .anim-name { font-weight: bold; color: #ce9178; font-family: monospace; }
+        .anim-meta { font-size: 11px; color: #888; margin-top: 2px; }
+        
+        #empty-state { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; color: #777; font-size: 1.1rem; pointer-events: none; }
+        #canvas-area.dragover { border: 2px dashed var(--accent2); background: #1a2220; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div>
+            <h1 style="margin: 0; font-size: 18px;">Rig & Animation Player</h1>
+            <small id="file-meta" style="color: #888;">Select the character folder to auto-load everything</small>
+        </div>
+        <div class="controls">
+            <label style="font-size: 12px; color: #aaa;">Scale: 
+                <select id="scaleSelect">
+                    <option value="1" selected>1×</option>
+                    <option value="2">2×</option>
+                    <option value="4">4×</option>
+                    <option value="8">8×</option>
+                </select>
+            </label>
+            <button class="btn-ui" id="toggleWireframe">Toggle Wireframe</button>
+            
+            <label class="upload-btn">
+                📁 Select Character Folder
+                <input type="file" id="folderInput" webkitdirectory directory multiple style="display: none;">
+            </label>
+        </div>
+    </header>
+    
+    <div class="container">
+        <div id="canvas-area">
+            <div id="empty-state">
+                <span>Click <strong>"📁 Select Character Folder"</strong> or drag &amp; drop the folder here.</span>
+                <span style="font-size: 0.85rem; color: #555;">(Auto-grabs the JSON and all PNGs in /images)</span>
+            </div>
+            <canvas id="viewCanvas"></canvas>
+            
+            <div id="playback-bar">
+                <button class="btn-ui" id="btnPlayPause">▶ Play</button>
+                <button class="btn-ui" id="btnStop">⏹ Reset</button>
+                <button class="btn-ui active" id="btnLoop">🔁 Loop</button>
+                <input type="range" id="timeSlider" min="0" max="1" step="0.001" value="0">
+                <span id="timeDisplay" style="font-family: monospace; min-width: 95px; text-align: center;">0.00 / 0.00s</span>
+                <select id="speedSelect">
+                    <option value="0.25">0.25×</option>
+                    <option value="0.5">0.5×</option>
+                    <option value="1" selected>1.0×</option>
+                    <option value="2">2.0×</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="col">
+            <h2>Bone Hierarchy <span id="bone-count" style="float:right; color:#888;"></span></h2>
+            <div class="content" id="bones-content"></div>
+        </div>
+
+        <div class="col">
+            <h2>Animations (Click to Play) <span id="anim-count" style="float:right; color:#888;"></span></h2>
+            <div class="content" id="anims-content"></div>
+        </div>
+    </div>
+
+    <script>
+        const folderInput = document.getElementById('folderInput');
+        const metaLabel = document.getElementById('file-meta');
+        const toggleWireframe = document.getElementById('toggleWireframe');
+        const scaleSelect = document.getElementById('scaleSelect');
+        const canvasArea = document.getElementById('canvas-area');
+        
+        const canvas = document.getElementById('viewCanvas');
+        const ctx = canvas.getContext('2d');
+        const emptyState = document.getElementById('empty-state');
+        const bonesContent = document.getElementById('bones-content');
+        const animsContent = document.getElementById('anims-content');
+
+        const btnPlayPause = document.getElementById('btnPlayPause');
+        const btnStop = document.getElementById('btnStop');
+        const btnLoop = document.getElementById('btnLoop');
+        const timeSlider = document.getElementById('timeSlider');
+        const timeDisplay = document.getElementById('timeDisplay');
+        const speedSelect = document.getElementById('speedSelect');
+        
+        let highlightedBone = null;
+        let showWireframe = true;
+        let spriteScale = 1.0; // Default set to 1x
+
+        let isPlaying = false;
+        let isLooping = true;
+        let playbackSpeed = 1.0;
+        let currentTime = 0.0;
+        let currentAnimName = null;
+        let currentAnimData = null;
+        let cameraBounds = null;
+
+        window.uploadedImages = {};
+        window.drawList = [];
+        window.animationsMap = {};
+
+        function resize() {
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = canvas.parentElement.clientHeight - document.getElementById('playback-bar').clientHeight;
+            if (window.currentBones) drawSkeleton();
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        toggleWireframe.addEventListener('click', () => { showWireframe = !showWireframe; drawSkeleton(); });
+        scaleSelect.addEventListener('change', (e) => { spriteScale = parseFloat(e.target.value); drawSkeleton(); });
+        speedSelect.addEventListener('change', (e) => { playbackSpeed = parseFloat(e.target.value); });
+
+        btnLoop.addEventListener('click', () => {
+            isLooping = !isLooping;
+            btnLoop.classList.toggle('active', isLooping);
+        });
+
+        btnPlayPause.addEventListener('click', () => {
+            if (!currentAnimData) return;
+            isPlaying = !isPlaying;
+            btnPlayPause.innerText = isPlaying ? "⏸ Pause" : "▶ Play";
+        });
+
+        btnStop.addEventListener('click', () => {
+            isPlaying = false;
+            currentTime = 0;
+            currentAnimName = null;
+            currentAnimData = null;
+            btnPlayPause.innerText = "▶ Play";
+            document.querySelectorAll('.anim-item').forEach(el => el.classList.remove('active'));
+            updateTimeUI();
+            drawSkeleton();
+        });
+
+        timeSlider.addEventListener('input', (e) => {
+            currentTime = parseFloat(e.target.value);
+            updateTimeUI();
+            drawSkeleton();
+        });
+
+        bonesContent.addEventListener('mouseover', (e) => {
+            if (e.target.classList.contains('bone-label')) { highlightedBone = e.target.dataset.bone; drawSkeleton(); }
+        });
+        bonesContent.addEventListener('mouseout', (e) => {
+            if (e.target.classList.contains('bone-label')) { highlightedBone = null; drawSkeleton(); }
+        });
+
+        folderInput.addEventListener('change', (e) => {
+            handleFileList(Array.from(e.target.files));
+        });
+
+        window.addEventListener('dragover', (e) => { e.preventDefault(); canvasArea.classList.add('dragover'); });
+        window.addEventListener('dragleave', (e) => { canvasArea.classList.remove('dragover'); });
+        window.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            canvasArea.classList.remove('dragover');
+            
+            const files = [];
+            const items = e.dataTransfer.items;
+            if (items) {
+                for (let i = 0; i < items.length; i++) {
+                    const entry = items[i].webkitGetAsEntry ? items[i].webkitGetAsEntry() : null;
+                    if (entry) await traverseFileTree(entry, files);
+                }
+            } else {
+                files.push(...e.dataTransfer.files);
+            }
+            if (files.length > 0) handleFileList(files);
+        });
+
+        async function traverseFileTree(item, fileList) {
+            if (item.isFile) {
+                const file = await new Promise(r => item.file(r));
+                fileList.push(file);
+            } else if (item.isDirectory) {
+                const dirReader = item.createReader();
+                const entries = await new Promise(r => dirReader.readEntries(r));
+                for (let entry of entries) {
+                    await traverseFileTree(entry, fileList);
+                }
+            }
+        }
+
+        async function handleFileList(files) {
+            if (!files.length) return;
+
+            metaLabel.style.color = "#4ec9b0";
+            metaLabel.innerText = `Scanning ${files.length} files...`;
+
+            const imageFiles = files.filter(f => /\.(png|jpe?g|webp)$/i.test(f.name));
+            const jsonFiles = files.filter(f => /\.json$/i.test(f.name));
+
+            window.uploadedImages = {};
+            let loadedImgCount = 0;
+            const imgPromises = imageFiles.map(file => {
+                return new Promise((resolve) => {
+                    const img = new Image();
+                    const cleanName = file.name.split('.')[0].toLowerCase();
+                    img.onload = () => {
+                        window.uploadedImages[cleanName] = img;
+                        loadedImgCount++;
+                        resolve();
+                    };
+                    img.onerror = resolve;
+                    img.src = URL.createObjectURL(file);
+                });
+            });
+
+            let skeletonFile = jsonFiles.find(f => f.name.toLowerCase() === 'captivity-roundtrip.json')
+                            || jsonFiles.find(f => f.name.toLowerCase().endsWith('_ske.json'));
+
+            let parsedJson = null;
+            if (skeletonFile) {
+                try { parsedJson = JSON.parse(await skeletonFile.text()); } catch (err) {}
+            } else {
+                jsonFiles.sort((a, b) => b.size - a.size);
+                for (const jf of jsonFiles) {
+                    try {
+                        const candidate = JSON.parse(await jf.text());
+                        if (candidate.type === "captivityDragonBonesRoundTrip" || (candidate.armature && candidate.armature.length)) {
+                            parsedJson = candidate;
+                            skeletonFile = jf;
+                            break;
+                        }
+                    } catch (e) {}
+                }
+            }
+
+            await Promise.all(imgPromises);
+
+            if (!parsedJson) {
+                metaLabel.style.color = "#f44336";
+                metaLabel.innerText = "Error: No skeleton JSON found in folder.";
+                alert("Could not find a valid skeleton JSON in the selected folder!");
+                return;
+            }
+
+            processJSON(parsedJson);
+            metaLabel.innerText = `Auto-loaded: ${skeletonFile.name} & ${loadedImgCount} images.`;
+            emptyState.style.display = 'none';
+        }
+
+        function processJSON(json) {
+            let isRoundtrip = json.type === "captivityDragonBonesRoundTrip";
+            let isDragonBones = json.armature && json.armature.length > 0;
+            if (!isRoundtrip && !isDragonBones) { alert("Unrecognized JSON format."); return; }
+            
+            let bones = [];
+            window.drawList = [];
+            window.animationsMap = {};
+            window.currentPpu = json.pixelsPerUnit || 128.0;
+
+            // Strict 1x default: do not auto-force 4x from JSON
+            spriteScale = parseFloat(scaleSelect.value) || 1.0;
+
+            if (isRoundtrip) {
+                bones = json.rig.bones || [];
+                window.animationsMap = json.sourceDocuments || {};
+                
+                bones.forEach(b => {
+                    if (b.sprites) {
+                        b.sprites.forEach(s => {
+                            window.drawList.push({
+                                boneName: b.name,
+                                imageName: s.name.toLowerCase(),
+                                baseZOrder: s.sortingOrder || 0,
+                                zOrder: s.sortingOrder || 0,
+                                pivotX: s.pivotX !== undefined ? s.pivotX : 0.5,
+                                pivotY: s.pivotY !== undefined ? s.pivotY : 0.5,
+                                isRoundtrip: true,
+                                localTx: 0, localTy: 0, localRot: 0, localScX: 1, localScY: 1
+                            });
+                        });
+                    }
+                });
+            } else {
+                const arm = json.armature[0];
+                bones = arm.bone || [];
+                const slots = arm.slot || [];
+                const skins = arm.skin || [];
+                
+                (arm.animation || []).forEach(a => {
+                    const fps = a.frameRate || arm.frameRate || 60;
+                    window.animationsMap[a.name] = {
+                        displayName: a.name,
+                        durationSeconds: (a.duration || 1) / fps,
+                        loop: a.playTimes === 0,
+                        rawDB: a,
+                        fps: fps
+                    };
+                });
+
+                if (skins.length > 0 && skins[0].slot) {
+                    skins[0].slot.forEach(skinSlot => {
+                        const slotInfo = slots.find(s => s.name === skinSlot.name);
+                        if (!slotInfo || !slotInfo.parent) return;
+                        const zOrder = (slotInfo.userData && slotInfo.userData.captivitySortingOrder) !== undefined 
+                                       ? slotInfo.userData.captivitySortingOrder 
+                                       : (slotInfo.displayIndex || 0);
+                        
+                        skinSlot.display.forEach(d => {
+                            if (d.type === "image" || !d.type) {
+                                const t = d.transform || {};
+                                window.drawList.push({
+                                    boneName: slotInfo.parent,
+                                    imageName: (d.path || d.name).toLowerCase(),
+                                    baseZOrder: zOrder,
+                                    zOrder: zOrder,
+                                    pivotX: d.pivot ? d.pivot.x : 0.5,
+                                    pivotY: d.pivot ? d.pivot.y : 0.5,
+                                    isRoundtrip: false,
+                                    localTx: t.x || 0,
+                                    localTy: t.y || 0,
+                                    localRot: (t.skX || 0) * Math.PI / 180,
+                                    localScX: t.scX !== undefined ? t.scX : 1,
+                                    localScY: t.scY !== undefined ? t.scY : 1
+                                });
+                            }
+                        });
+                    });
+                }
+            }
+            
+            document.getElementById('bone-count').innerText = bones.length;
+            document.getElementById('anim-count').innerText = Object.keys(window.animationsMap).length;
+
+            renderBonesTree(bones);
+            renderAnimationsList();
+            
+            window.currentBones = bones;
+            window.currentIsRoundtrip = isRoundtrip;
+            cameraBounds = null;
+            drawSkeleton();
+        }
+
+        function renderBonesTree(bones) {
+            const map = {};
+            const roots = [];
+            bones.forEach(b => { map[b.name] = { data: b, children: [] }; });
+            bones.forEach(b => { if (b.parent && map[b.parent]) map[b.parent].children.push(map[b.name]); else roots.push(map[b.name]); });
+            function makeList(nodes) {
+                if (nodes.length === 0) return "";
+                let html = "<ul>";
+                nodes.forEach(n => { html += `<li><span class="bone bone-label" data-bone="${n.data.name}">🦴 ${n.data.name}</span>${makeList(n.children)}</li>`; });
+                return html + "</ul>";
+            }
+            bonesContent.innerHTML = `<ul class="root">${roots.map(n => `<li><span class="bone bone-label" data-bone="${n.data.name}">🦴 ${n.data.name}</span>${makeList(n.children)}</li>`).join('')}</ul>`;
+        }
+
+        function renderAnimationsList() {
+            const animKeys = Object.keys(window.animationsMap);
+            if (animKeys.length === 0) { animsContent.innerHTML = "<i style='color:#666;'>No animations found.</i>"; return; }
+            
+            let html = "";
+            animKeys.forEach(name => {
+                const anim = window.animationsMap[name];
+                const dur = (anim.durationSeconds || 0).toFixed(2);
+                html += `
+                    <div class="anim-item" data-anim="${name}">
+                        <div class="anim-name">▶ ${name}</div>
+                        <div class="anim-meta">Length: ${dur}s ${anim.loop ? '• 🔁 Loop' : ''}</div>
+                    </div>
+                `;
+            });
+            animsContent.innerHTML = html;
+
+            document.querySelectorAll('.anim-item').forEach(el => {
+                el.addEventListener('click', () => {
+                    playAnimation(el.dataset.anim);
+                });
+            });
+        }
+
+        function playAnimation(name) {
+            const anim = window.animationsMap[name];
+            if (!anim) return;
+            
+            currentAnimName = name;
+            currentAnimData = anim;
+            currentTime = 0;
+            isPlaying = true;
+            isLooping = anim.loop !== undefined ? anim.loop : true;
+            
+            btnLoop.classList.toggle('active', isLooping);
+            btnPlayPause.innerText = "⏸ Pause";
+            
+            timeSlider.max = String(anim.durationSeconds || 1);
+            timeSlider.value = "0";
+
+            document.querySelectorAll('.anim-item').forEach(el => {
+                el.classList.toggle('active', el.dataset.anim === name);
+            });
+
+            updateTimeUI();
+            drawSkeleton();
+        }
+
+        function updateTimeUI() {
+            const total = currentAnimData ? currentAnimData.durationSeconds : 0;
+            timeSlider.value = String(currentTime);
+            timeDisplay.innerText = `${currentTime.toFixed(2)} / ${total.toFixed(2)}s`;
+        }
+
+        function evaluateHermiteTrack(keys, time) {
+            if (!keys || keys.length === 0) return 0;
+            if (time <= keys[0].time) return keys[0].value;
+            if (time >= keys[keys.length - 1].time) return keys[keys.length - 1].value;
+            
+            let i = 0;
+            for (let k = 0; k < keys.length - 1; k++) {
+                if (time >= keys[k].time && time <= keys[k + 1].time) {
+                    i = k;
+                    break;
+                }
+            }
+            
+            const k0 = keys[i];
+            const k1 = keys[i + 1];
+            const dt = k1.time - k0.time;
+            if (dt <= 0.00001) return k0.value;
+            
+            const u = (time - k0.time) / dt;
+            const u2 = u * u;
+            const u3 = u2 * u;
+            
+            const m0 = k0.outTangent !== undefined ? k0.outTangent : 0;
+            const m1 = k1.inTangent !== undefined ? k1.inTangent : 0;
+            
+            const h00 = 2 * u3 - 3 * u2 + 1;
+            const h10 = u3 - 2 * u2 + u;
+            const h01 = -2 * u3 + 3 * u2;
+            const h11 = u3 - u2;
+            
+            return h00 * k0.value + h10 * m0 * dt + h01 * k1.value + h11 * m1 * dt;
+        }
+
+        function evaluateDBFrames(frames, currentFrame, defaultVal, key = 'x') {
+            if (!frames || frames.length === 0) return defaultVal;
+            let elapsed = 0;
+            for (let i = 0; i < frames.length; i++) {
+                const f = frames[i];
+                const dur = f.duration || 1;
+                if (currentFrame >= elapsed && currentFrame < elapsed + dur) {
+                    const nextF = frames[(i + 1) % frames.length];
+                    const u = (currentFrame - elapsed) / dur;
+                    const v0 = f[key] !== undefined ? f[key] : defaultVal;
+                    const v1 = (nextF && nextF[key] !== undefined) ? nextF[key] : v0;
+                    return v0 + (v1 - v0) * u;
+                }
+                elapsed += dur;
+            }
+            const last = frames[frames.length - 1];
+            return last[key] !== undefined ? last[key] : defaultVal;
+        }
+
+        function drawSkeleton() {
+            const bones = window.currentBones;
+            if (!bones) return;
+            const isRoundtrip = window.currentIsRoundtrip;
+            const globals = {};
+            const map = {};
+            bones.forEach(b => map[b.name] = b);
+            
+            function createMatrix(x, y, rot, scX = 1, scY = 1) { 
+                const cos = Math.cos(rot), sin = Math.sin(rot); 
+                return { a: cos * scX, b: sin * scX, c: -sin * scY, d: cos * scY, tx: x, ty: y }; 
+            }
+            function multiply(p, l) {
+                return { 
+                    a: l.a * p.a + l.b * p.c, 
+                    b: l.a * p.b + l.b * p.d, 
+                    c: l.c * p.a + l.d * p.c, 
+                    d: l.c * p.b + l.d * p.d, 
+                    tx: l.tx * p.a + l.ty * p.c + p.tx, 
+                    ty: l.tx * p.b + l.ty * p.d + p.ty 
+                };
+            }
+            
+            function resolve(name) {
+                if (globals[name]) return globals[name];
+                const b = map[name];
+                if (!b) return null;
+                
+                let localMat;
+                if (isRoundtrip) {
+                    const t = b.defaultTransform || {};
+                    let posX = t.x || 0;
+                    let posY = t.y || 0;
+                    let rotZ = t.rotationZ || 0;
+                    let scX = t.scaleX !== undefined ? t.scaleX : 1;
+                    let scY = t.scaleY !== undefined ? t.scaleY : 1;
+
+                    if (currentAnimData && currentAnimData.tracks) {
+                        currentAnimData.tracks.forEach(track => {
+                            if (track.target === `bone/${b.name}`) {
+                                const val = evaluateHermiteTrack(track.keys, currentTime);
+                                if (track.property === "position.x") posX = val;
+                                if (track.property === "position.y") posY = val;
+                                if (track.property === "rotation.z") rotZ = val;
+                                if (track.property === "scale.x") scX = val;
+                                if (track.property === "scale.y") scY = val;
+                            }
+                        });
+                    }
+
+                    localMat = createMatrix(posX * window.currentPpu, -posY * window.currentPpu, -rotZ * Math.PI / 180, scX, scY);
+                } else {
+                    const t = b.transform || {};
+                    let posX = t.x || 0;
+                    let posY = t.y || 0;
+                    let rotDeg = t.skX || 0;
+                    let scX = t.scX !== undefined ? t.scX : 1;
+                    let scY = t.scY !== undefined ? t.scY : 1;
+
+                    if (currentAnimData && currentAnimData.rawDB && currentAnimData.rawDB.bone) {
+                        const boneAnim = currentAnimData.rawDB.bone.find(ba => ba.name === b.name);
+                        if (boneAnim) {
+                            const curFrame = currentTime * (currentAnimData.fps || 60);
+                            if (boneAnim.translateFrame) {
+                                posX += evaluateDBFrames(boneAnim.translateFrame, curFrame, 0, 'x');
+                                posY += evaluateDBFrames(boneAnim.translateFrame, curFrame, 0, 'y');
+                            }
+                            if (boneAnim.rotateFrame) {
+                                rotDeg += evaluateDBFrames(boneAnim.rotateFrame, curFrame, 0, 'rotate');
+                            }
+                            if (boneAnim.scaleFrame) {
+                                scX *= evaluateDBFrames(boneAnim.scaleFrame, curFrame, 1, 'x');
+                                scY *= evaluateDBFrames(boneAnim.scaleFrame, curFrame, 1, 'y');
+                            }
+                        }
+                    }
+
+                    localMat = createMatrix(posX, posY, rotDeg * Math.PI / 180, scX, scY);
+                }
+                
+                if (b.parent && map[b.parent]) globals[name] = multiply(resolve(b.parent), localMat);
+                else globals[name] = localMat;
+                
+                return globals[name];
+            }
+            
+            bones.forEach(b => resolve(b.name));
+            
+            if (!cameraBounds) {
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                for (let name in globals) {
+                    const m = globals[name];
+                    if (m.tx < minX) minX = m.tx; if (m.tx > maxX) maxX = m.tx;
+                    if (m.ty < minY) minY = m.ty; if (m.ty > maxY) maxY = m.ty;
+                }
+                if (maxX - minX < 1) { maxX += 100; minX -= 100; }
+                if (maxY - minY < 1) { maxY += 100; minY -= 100; }
+                const pad = 120;
+                cameraBounds = { minX: minX - pad, minY: minY - pad, maxX: maxX + pad, maxY: maxY + pad };
+            }
+            
+            const w = cameraBounds.maxX - cameraBounds.minX;
+            const h = cameraBounds.maxY - cameraBounds.minY;
+            const scale = Math.min((canvas.width - 40) / w, (canvas.height - 40) / h);
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.scale(scale, scale);
+            ctx.translate(-(cameraBounds.minX + w / 2), -(cameraBounds.minY + h / 2));
+            
+            ctx.imageSmoothingEnabled = false;
+
+            window.drawList.forEach(item => {
+                let currentZ = item.baseZOrder;
+                if (currentAnimData && currentAnimData.tracks) {
+                    const track = currentAnimData.tracks.find(t => 
+                        (t.target === `sprite/${item.boneName}` || t.target === `sprite/${item.imageName}`) && 
+                        t.property === "sortingOrder"
+                    );
+                    if (track) currentZ = evaluateHermiteTrack(track.keys, currentTime);
+                }
+                item.zOrder = currentZ;
+            });
+            window.drawList.sort((a, b) => a.zOrder - b.zOrder);
+
+            window.drawList.forEach(item => {
+                const img = window.uploadedImages[item.imageName];
+                const boneMat = globals[item.boneName];
+                
+                if (img && boneMat) {
+                    ctx.save();
+                    ctx.transform(boneMat.a, boneMat.b, boneMat.c, boneMat.d, boneMat.tx, boneMat.ty);
+                    ctx.translate(item.localTx, item.localTy);
+                    ctx.rotate(item.localRot);
+                    ctx.scale(item.localScX, item.localScY);
+                    
+                    const drawW = img.width * spriteScale;
+                    const drawH = img.height * spriteScale;
+                    const pX = item.pivotX;
+                    const pY = item.isRoundtrip ? (1.0 - item.pivotY) : item.pivotY;
+
+                    ctx.drawImage(img, -pX * drawW, -pY * drawH, drawW, drawH);
+                    ctx.restore();
+                }
+            });
+
+            if (showWireframe) {
+                ctx.strokeStyle = 'rgba(0, 122, 204, 0.7)';
+                ctx.lineWidth = 3 / scale;
+                ctx.lineCap = 'round';
+                
+                bones.forEach(b => {
+                    if (b.parent && globals[b.parent] && globals[b.name]) {
+                        ctx.beginPath(); ctx.moveTo(globals[b.parent].tx, globals[b.parent].ty); ctx.lineTo(globals[b.name].tx, globals[b.name].ty); ctx.stroke();
+                    }
+                });
+                
+                bones.forEach(b => {
+                    if (globals[b.name]) {
+                        let isHighlighted = b.name === highlightedBone;
+                        ctx.fillStyle = isHighlighted ? '#ffff00' : '#ffffff';
+                        ctx.beginPath(); ctx.arc(globals[b.name].tx, globals[b.name].ty, isHighlighted ? 10/scale : 4/scale, 0, Math.PI * 2); ctx.fill();
+                        if (isHighlighted) {
+                            ctx.fillStyle = '#ffff00';
+                            ctx.font = `${16/scale}px Arial`;
+                            ctx.fillText(b.name, globals[b.name].tx + (15/scale), globals[b.name].ty);
+                        }
+                    }
+                });
+            }
+            
+            ctx.restore();
+        }
+
+        let lastFrameTime = performance.now();
+        function loop(now) {
+            const dt = (now - lastFrameTime) / 1000;
+            lastFrameTime = now;
+            
+            if (isPlaying && currentAnimData) {
+                currentTime += dt * playbackSpeed;
+                const dur = currentAnimData.durationSeconds || 1.0;
+                
+                if (currentTime >= dur) {
+                    if (isLooping) {
+                        currentTime = currentTime % dur;
+                    } else {
+                        currentTime = dur;
+                        isPlaying = false;
+                        btnPlayPause.innerText = "▶ Play";
+                    }
+                }
+                
+                updateTimeUI();
+                drawSkeleton();
+            }
+            
+            requestAnimationFrame(loop);
+        }
+        requestAnimationFrame(loop);
+    </script>
+</body>
+</html>
